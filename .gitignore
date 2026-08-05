@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+backend/master/*.xlsx
+backend/master/*.csv
+*.log
+.DS_Store
