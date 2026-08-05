@@ -96,10 +96,31 @@ function ChangePassword({ forced, onDone }) {
 }
 
 /* ---------------- Admin: live documents ---------------- */
-function DocumentsTable({ docs }) {
+function IssueControl({ doc, employees, reload }) {
+  const [emp, setEmp] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function issue() {
+    if (!emp) return;
+    setBusy(true);
+    try { await api('/api/admin/issue', { method: 'POST', body: { document_id: doc.document_id, employee_id: emp } }); await reload(); setEmp(''); }
+    catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+      <select value={emp} onChange={e => setEmp(e.target.value)} style={{ maxWidth: 170 }}>
+        <option value="">Issue to…</option>
+        {employees.map(e => <option key={e.employee_id} value={e.employee_id}>{e.name}</option>)}
+      </select>
+      <button className="primary" disabled={!emp || busy} onClick={issue}>Issue</button>
+    </div>
+  );
+}
+
+function DocumentsTable({ docs, employees, reload }) {
   const [tower, setTower] = useState('');
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
+  const [busy, setBusy] = useState(null);
   const towers = [...new Set(docs.map(d => d.tower).filter(Boolean))].sort();
 
   const filtered = docs.filter(d =>
@@ -107,6 +128,12 @@ function DocumentsTable({ docs }) {
     (!status || d.status === status) &&
     (!search || `${d.document_id} ${d.flat_number} ${d.holder_name || ''}`.toLowerCase().includes(search.toLowerCase()))
   );
+
+  async function doReturn(id) {
+    setBusy(id);
+    try { await api('/api/admin/return', { method: 'POST', body: { document_id: id } }); await reload(); }
+    catch (e) { alert(e.message); } finally { setBusy(null); }
+  }
 
   return (
     <div className="card">
@@ -126,14 +153,20 @@ function DocumentsTable({ docs }) {
         </select>
       </div>
       <table>
-        <thead><tr><th>Document</th><th>Tower</th><th>Flat</th><th>Type</th><th>Current location</th><th>Updated</th></tr></thead>
+        <thead><tr><th>Document</th><th>Tower</th><th>Flat</th><th>Type</th><th>Current location</th><th className="right">Action</th></tr></thead>
         <tbody>
           {filtered.map(d => (
             <tr key={d.document_id}>
               <td>{d.document_id}</td><td>{d.tower}</td><td>{d.flat_number}</td>
               <td className="muted">{d.doc_type || '—'}</td>
               <td><LocationBadge doc={d} /></td>
-              <td className="muted">{new Date(d.updated_at).toLocaleString()}</td>
+              <td className="right">
+                {d.status === 'in_storage' && <IssueControl doc={d} employees={employees} reload={reload} />}
+                {(d.status === 'with_employee' || d.status === 'pending_return') &&
+                  <button className="ghost" disabled={busy === d.document_id}
+                          onClick={() => doReturn(d.document_id)}>Return to storage</button>}
+                {d.status === 'pending_out' && <span className="muted">In approvals</span>}
+              </td>
             </tr>
           ))}
           {filtered.length === 0 && <tr><td colSpan={6} className="empty">No documents match.</td></tr>}
@@ -307,11 +340,15 @@ export default function App() {
   const [tab, setTab] = useState('documents');
   const [docs, setDocs] = useState([]);
   const [pending, setPending] = useState([]);
+  const [employees, setEmployees] = useState([]);
 
   const reload = useCallback(async () => {
     if (!user) return;
     try { setDocs(await api('/api/documents')); } catch {}
-    if (user.role === 'admin') { try { setPending(await api('/api/movements/pending')); } catch {} }
+    if (user.role === 'admin') {
+      try { setPending(await api('/api/movements/pending')); } catch {}
+      try { setEmployees(await api('/api/employees')); } catch {}
+    }
   }, [user]);
 
   useEffect(() => {
@@ -347,7 +384,7 @@ export default function App() {
           ))}
         </div>
 
-        {user.role === 'admin' && tab === 'documents' && <DocumentsTable docs={docs} />}
+        {user.role === 'admin' && tab === 'documents' && <DocumentsTable docs={docs} employees={employees} reload={reload} />}
         {user.role === 'admin' && tab === 'approvals' && <Approvals pending={pending} reload={reload} />}
         {user.role === 'admin' && tab === 'users' && <Users />}
 

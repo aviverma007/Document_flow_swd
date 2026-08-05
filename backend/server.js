@@ -257,6 +257,62 @@ app.post('/api/users/:id/reset-password', authRequired, adminOnly, async (req, r
   } catch (e) { res.status(500).json({ error: 'Failed', detail: e.message }); }
 });
 
+/* ---------------- ADMIN: direct issue / return (storekeeper actions) ---------------- */
+
+// Admin hands a document directly to an employee (no approval round-trip)
+app.post('/api/admin/issue', authRequired, adminOnly, async (req, res) => {
+  const { document_id, employee_id } = req.body || {};
+  if (!document_id || !employee_id) return res.status(400).json({ error: 'document_id and employee_id required' });
+  try {
+    const pool = await getPool();
+    const d = await q(pool).input('doc', sql.NVarChar, document_id)
+      .query('SELECT * FROM docflow.documents WHERE document_id = @doc');
+    const doc = d.recordset[0];
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (doc.status !== 'in_storage')
+      return res.status(409).json({ error: 'Document must be in storage to issue it' });
+
+    await q(pool)
+      .input('doc', sql.NVarChar, document_id)
+      .input('to', sql.NVarChar, employee_id)
+      .input('by', sql.Int, req.user.user_id)
+      .query(`INSERT INTO docflow.movements (document_id, action, to_holder_id, requested_by, status, approved_by, decided_at)
+              VALUES (@doc, 'issue', @to, @by, 'approved', @by, SYSDATETIME())`);
+    await q(pool).input('doc', sql.NVarChar, document_id).input('h', sql.NVarChar, employee_id)
+      .query(`UPDATE docflow.documents SET status = 'with_employee', current_holder_id = @h, updated_at = SYSDATETIME() WHERE document_id = @doc`);
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Issue failed', detail: e.message }); }
+});
+
+// Admin records a document coming back into storage directly
+app.post('/api/admin/return', authRequired, adminOnly, async (req, res) => {
+  const { document_id } = req.body || {};
+  if (!document_id) return res.status(400).json({ error: 'document_id required' });
+  try {
+    const pool = await getPool();
+    const d = await q(pool).input('doc', sql.NVarChar, document_id)
+      .query('SELECT * FROM docflow.documents WHERE document_id = @doc');
+    const doc = d.recordset[0];
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (doc.status !== 'with_employee' && doc.status !== 'pending_return')
+      return res.status(409).json({ error: 'Document is not currently out with an employee' });
+
+    await q(pool)
+      .input('doc', sql.NVarChar, document_id)
+      .input('from', sql.NVarChar, doc.current_holder_id)
+      .input('by', sql.Int, req.user.user_id)
+      .query(`INSERT INTO docflow.movements (document_id, action, from_holder_id, requested_by, status, approved_by, decided_at)
+              VALUES (@doc, 'return', @from, @by, 'approved', @by, SYSDATETIME())`);
+    // close any open pending_return request on this doc
+    await q(pool).input('doc', sql.NVarChar, document_id).input('by', sql.Int, req.user.user_id)
+      .query(`UPDATE docflow.movements SET status = 'approved', approved_by = @by, decided_at = SYSDATETIME()
+              WHERE document_id = @doc AND status = 'pending'`);
+    await q(pool).input('doc', sql.NVarChar, document_id)
+      .query(`UPDATE docflow.documents SET status = 'in_storage', current_holder_id = NULL, updated_at = SYSDATETIME() WHERE document_id = @doc`);
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Return failed', detail: e.message }); }
+});
+
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'docflow', time: new Date().toISOString() }));
 
 const PORT = process.env.PORT || 5096;
