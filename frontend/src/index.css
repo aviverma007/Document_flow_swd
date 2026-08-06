@@ -204,3 +204,23 @@ tr:hover td { background: #f7f9fc; }
 .toast.error { border-left-color: #ef4444; }
 .toast.info { border-left-color: var(--sw-blue-2); }
 .toast .tt { font-weight: 600; }
+
+/* ---------- Sidebar footer (settings + logout) ---------- */
+.side-footer { border-top: 1px solid rgba(255,255,255,.12); padding: 8px 12px 14px; }
+.side-footer .nav-item { margin-bottom: 4px; }
+.logout-btn { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; border-radius: 11px;
+  background: rgba(255,255,255,.10); border: none; color: #fff; font-size: 14.5px; margin-top: 4px; }
+.logout-btn svg { width: 20px; height: 20px; flex-shrink: 0; }
+.logout-btn:hover { background: rgba(239,68,68,.85); }
+.sidebar.collapsed .logout-btn { justify-content: center; }
+.sidebar.collapsed .logout-btn span { display: none; }
+.side-footer .user-block { border-top: none; padding: 8px 4px; }
+
+/* ---------- Fixed-height panel with internal scroll ---------- */
+.fixed-panel { height: 440px; display: flex; flex-direction: column; }
+.fixed-panel .panel-scroll { flex: 1; overflow-y: auto; }
+.fixed-panel .panel-scroll thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
+
+/* keep the page from scrolling the whole layout */
+.content { height: 100vh; overflow: hidden; }
+.page { flex: 1; overflow-y: auto; }

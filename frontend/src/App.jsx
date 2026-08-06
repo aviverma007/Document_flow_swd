@@ -18,6 +18,7 @@ const ITruck = () => <svg viewBox="0 0 24 24" {...ic}><path d="M3 6h11v9H3z" /><
 const IBell = () => <svg viewBox="0 0 24 24" {...ic}><path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6z" /><path d="M10 20a2 2 0 004 0" /></svg>;
 const IPower = () => <svg viewBox="0 0 24 24" {...ic}><path d="M12 4v8" /><path d="M7 7a7 7 0 108 0" /></svg>;
 const IChevron = () => <svg viewBox="0 0 24 24" {...ic}><path d="M14 6l-6 6 6 6" /></svg>;
+const ISettings = () => <svg viewBox="0 0 24 24" {...ic}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-2.7 1.1V21a2 2 0 11-4 0v-.1a1.6 1.6 0 00-2.7-1.1l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.6 1.6 0 00-1.1-2.7H3a2 2 0 110-4h.1a1.6 1.6 0 001.1-2.7l-.1-.1a2 2 0 112.8-2.8l.1.1a1.6 1.6 0 002.7-1.1V3a2 2 0 114 0v.1a1.6 1.6 0 002.7 1.1l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-1.1 2.7H21a2 2 0 110 4h-.1a1.6 1.6 0 00-1.5 1z" /></svg>;
 
 function Logo({ sm }) {
   return (<span className={'logo-sq' + (sm ? ' sm' : '')}>
@@ -279,7 +280,8 @@ function MyDocuments({ user }) {
                 <button className="ghost" onClick={() => run({ confirmTitle: 'Not received?', confirmMsg: `Report that ${d.document_id} was NOT handed to you? It goes back to the transferrer.`, confirmLabel: 'Not received', path: '/api/user/received', body: { document_id: d.document_id, received: false }, success: 'Sent back to the transferrer', after: load })}>Not received</button>
               </td></tr>))}</tbody></table></div>
       )}
-      <div className="card"><h3>In my custody ({custody.length})</h3>
+      <div className="card fixed-panel"><h3>In my custody ({custody.length})</h3>
+        <div className="panel-scroll">
         <table><thead><tr><th>Document</th><th>Tower</th><th>Flat</th><th>Status</th><th className="right">Action</th></tr></thead>
           <tbody>
             {custody.map(d => (<tr key={d.document_id}><td>{d.document_id}</td><td>{d.tower}</td><td>{d.flat_number}</td><td><StatusBadge d={d} /></td>
@@ -287,7 +289,8 @@ function MyDocuments({ user }) {
                 ? <button className="primary" onClick={() => run({ confirmTitle: 'Return this document?', confirmMsg: `Request return of ${d.document_id} to storage? A transferrer will pick it up from you.`, confirmLabel: 'Return', path: '/api/movements/request-return', body: { document_id: d.document_id }, success: 'Return requested — transferrer will collect it', after: load })}>Return to storage</button>
                 : <span className="muted">Return in progress</span>}</td></tr>))}
             {custody.length === 0 && <tr><td colSpan={5} className="empty">You are not holding any documents.</td></tr>}
-          </tbody></table></div>
+          </tbody></table>
+        </div></div>
       {incoming.length > 0 && (
         <div className="card"><h3>Incoming to you ({incoming.length})</h3>
           <table><thead><tr><th>Document</th><th>Tower / Flat</th><th>Status</th></tr></thead>
@@ -298,7 +301,7 @@ function MyDocuments({ user }) {
 }
 
 /* ================= Sidebar / bell / modal / toasts ================= */
-function Sidebar({ user, items, tab, setTab, collapsed, onToggle, onLogout }) {
+function Sidebar({ user, items, tab, setTab, collapsed, onToggle, onSettings, onLogout }) {
   const initials = (user.username || '?').slice(0, 2).toUpperCase();
   return (
     <div className={'sidebar' + (collapsed ? ' collapsed' : '')}>
@@ -310,9 +313,14 @@ function Sidebar({ user, items, tab, setTab, collapsed, onToggle, onLogout }) {
           {it.icon}<span>{it.label}</span>{it.badge ? <span className="badge-count">{it.badge}</span> : null}
         </button>))}
       </div>
-      <div className="user-block"><div className="avatar">{initials}</div>
-        <div className="meta"><div className="nm">{user.username}</div><div className="rl"><span className="g" />{user.role}</div></div>
-        <button className="pw" onClick={onLogout} title="Logout"><IPower /></button>
+      <div className="side-footer">
+        <button className={'nav-item' + (tab === 'password' ? ' active' : '')} onClick={onSettings} title="Settings">
+          <ISettings /><span>Settings</span>
+        </button>
+        <div className="user-block"><div className="avatar">{initials}</div>
+          <div className="meta"><div className="nm">{user.username}</div><div className="rl"><span className="g" />{user.role}</div></div>
+        </div>
+        <button className="logout-btn" onClick={onLogout} title="Logout"><IPower /><span>Logout</span></button>
       </div>
     </div>
   );
@@ -406,7 +414,9 @@ export default function App() {
     receiving: docs.filter(d => d.status === 'return_delivered').length,
     pickups: docs.filter(d => d.status === 'out_awaiting_pickup' || d.status === 'return_awaiting_pickup').length,
     transit: docs.filter(d => (d.status === 'out_in_transit' || d.status === 'return_in_transit') && d.transferrer_user_id === user.user_id).length,
-    mine: docs.filter(d => d.status === 'out_delivered' && d.pending_holder_id === user.employee_id).length,
+    // documents currently in the employee's hand (held or return-in-progress) + any awaiting their receipt
+    mine: docs.filter(d => (d.current_holder_id === user.employee_id) ||
+      (d.status === 'out_delivered' && d.pending_holder_id === user.employee_id)).length,
   };
   const itemsByRole = {
     admin: [
@@ -414,18 +424,15 @@ export default function App() {
       { key: 'approvals', label: 'Approvals', icon: <ICheck />, badge: c.approvals },
       { key: 'receiving', label: 'Receiving', icon: <IInbox />, badge: c.receiving },
       { key: 'users', label: 'Users', icon: <IUsers /> },
-      { key: 'password', label: 'Password', icon: <ILock /> },
     ],
     transferrer: [
       { key: 'pickups', label: 'Pickups', icon: <ITruck />, badge: c.pickups },
       { key: 'transit', label: 'In Transit', icon: <IInbox />, badge: c.transit },
       { key: 'documents', label: 'Documents', icon: <IHome /> },
-      { key: 'password', label: 'Password', icon: <ILock /> },
     ],
     user: [
       { key: 'browse', label: 'All Documents', icon: <IFile /> },
       { key: 'mine', label: 'My Documents', icon: <IFolder />, badge: c.mine },
-      { key: 'password', label: 'Password', icon: <ILock /> },
     ],
   };
   const items = itemsByRole[user.role] || itemsByRole.user;
@@ -435,7 +442,7 @@ export default function App() {
   return (
     <UI.Provider value={{ run, notify, confirm }}>
       <div className="layout">
-        <Sidebar user={user} items={items} tab={tab} setTab={setTab} collapsed={collapsed} onToggle={() => setCollapsed(v => !v)} onLogout={logout} />
+        <Sidebar user={user} items={items} tab={tab} setTab={setTab} collapsed={collapsed} onToggle={() => setCollapsed(v => !v)} onSettings={() => setTab('password')} onLogout={logout} />
         <div className="content">
           <div className="topbar2">
             <div className="title">{titles[tab] || 'Document Flow'}<small>Smart World Developers · Custody Portal</small></div>
