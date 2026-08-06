@@ -41,8 +41,10 @@ CREATE TABLE docflow.documents (
     doc_type           NVARCHAR(100) NULL,
     remarks            NVARCHAR(500) NULL,
     status             NVARCHAR(20)  NOT NULL DEFAULT 'in_storage',
-    current_holder_id  NVARCHAR(50)  NULL,
-    updated_at         DATETIME2     NOT NULL DEFAULT SYSDATETIME(),
+    current_holder_id   NVARCHAR(50)  NULL,
+    pending_holder_id   NVARCHAR(50)  NULL,
+    transferrer_user_id INT           NULL,
+    updated_at          DATETIME2     NOT NULL DEFAULT SYSDATETIME(),
     CONSTRAINT FK_documents_holder FOREIGN KEY (current_holder_id)
         REFERENCES docflow.employees(employee_id)
 );
@@ -81,12 +83,23 @@ CREATE TABLE docflow.movements (
     requested_at    DATETIME2    NOT NULL DEFAULT SYSDATETIME(),
     decided_at      DATETIME2    NULL,
     remarks         NVARCHAR(500) NULL,
+    stage           NVARCHAR(30) NULL,
+    actor_id        INT          NULL,
     CONSTRAINT FK_mov_document FOREIGN KEY (document_id)   REFERENCES docflow.documents(document_id),
     CONSTRAINT FK_mov_from     FOREIGN KEY (from_holder_id) REFERENCES docflow.employees(employee_id),
     CONSTRAINT FK_mov_to       FOREIGN KEY (to_holder_id)   REFERENCES docflow.employees(employee_id),
     CONSTRAINT FK_mov_reqby    FOREIGN KEY (requested_by)   REFERENCES docflow.users(user_id),
     CONSTRAINT FK_mov_appby    FOREIGN KEY (approved_by)    REFERENCES docflow.users(user_id)
 );
+GO
+
+/* ---------- 6b. Foreign keys for handoff columns ---------- */
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_documents_pending')
+    ALTER TABLE docflow.documents ADD CONSTRAINT FK_documents_pending
+        FOREIGN KEY (pending_holder_id) REFERENCES docflow.employees(employee_id);
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_documents_transferrer')
+    ALTER TABLE docflow.documents ADD CONSTRAINT FK_documents_transferrer
+        FOREIGN KEY (transferrer_user_id) REFERENCES docflow.users(user_id);
 GO
 
 /* ---------- 7. Indexes ---------- */

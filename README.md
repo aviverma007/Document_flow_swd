@@ -6,19 +6,25 @@ with an admin-approved issue/return workflow.
 
 ## How it works
 
-A document is always in exactly one of four states:
+Three roles — **admin** (storekeeper), **transferrer** (courier), **user** (employee) —
+and a physical handoff at every step.
 
+**Issue (storage -> employee):**
 ```
-in_storage  --request take-->  pending_out  --admin approve-->  with_employee
-with_employee  --request return-->  pending_return  --admin approve-->  in_storage
+in_storage -> user REQUESTS -> awaiting admin -> admin APPROVES -> awaiting pickup
+-> transferrer ACCEPTS -> in transit -> transferrer DROPPED -> delivered
+-> user RECEIVED -> with_employee
 ```
 
-- Only documents `in_storage` can be requested. Once a document is with an employee it is
-  **locked** — no one else can request it until it is returned to storage.
-- **No employee-to-employee handoffs.** Everything routes back through the storage room.
-- **Admin** approves/rejects every issue and every return, sees live locations, manages users.
-- **Users** (one login per employee) request takes/returns, see their own custody, and
-  change their own password.
+**Return (employee -> storage):**
+```
+with_employee -> user RETURNS -> awaiting pickup -> transferrer ACCEPTS -> in transit
+-> transferrer DROPPED -> at storage -> admin RECEIVED -> in_storage
+```
+
+- A document is **locked** the moment it leaves storage — no one else can request it until it is fully back.
+- Every action shows a **confirmation popup**; each role gets **live toast notifications** and a bell count of items awaiting them.
+- No employee-to-employee handoffs; everything routes through the transferrer and storage.
 
 ## Stack
 
@@ -33,6 +39,9 @@ Create a database (e.g. `DocFlowDB`) on your SQL Server (`192.168.66.33`), then 
 ```
 sqlcmd -S 192.168.66.33 -d DocFlowDB -U <user> -P <pass> -i backend\schema.sql
 ```
+
+If upgrading an existing DB, also run `backend\migration_transferrer.sql` (adds the
+transferrer role columns + a `transfer` login).
 
 ### 2. Backend
 ```

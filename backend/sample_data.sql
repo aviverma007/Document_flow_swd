@@ -7,6 +7,7 @@
      EMP001 / SmartWorld@2026   (user - Rahul Sharma)
      EMP002 / SmartWorld@2026   (user - Priya Nair)
      EMP003 / SmartWorld@2026   (user - Amit Singh)
+     transfer / SmartWorld@2026 (transferrer)
    ============================================================ */
 USE DocFlowDB;
 GO
@@ -43,10 +44,11 @@ INSERT INTO docflow.users (username, password_hash, role, employee_id, must_chan
  ('admin', '$2b$10$JxoXnX7n9j4GTKagyovW2uC3VW9pwI5UXjRPJtPs4gjY9eKf67cka', 'admin', NULL, 0),
  ('EMP001','$2b$10$YEkicjReVRxs4V1PExJp3.yxirnWUZkTymEK1W10JVdakHMX.qaVS', 'user', 'EMP001', 0),
  ('EMP002','$2b$10$YEkicjReVRxs4V1PExJp3.yxirnWUZkTymEK1W10JVdakHMX.qaVS', 'user', 'EMP002', 0),
- ('EMP003','$2b$10$YEkicjReVRxs4V1PExJp3.yxirnWUZkTymEK1W10JVdakHMX.qaVS', 'user', 'EMP003', 0);
+ ('EMP003','$2b$10$YEkicjReVRxs4V1PExJp3.yxirnWUZkTymEK1W10JVdakHMX.qaVS', 'user', 'EMP003', 0),
+ ('transfer','$2b$10$YEkicjReVRxs4V1PExJp3.yxirnWUZkTymEK1W10JVdakHMX.qaVS', 'transferrer', NULL, 0);
 GO
 
-PRINT 'Sample data inserted: 6 employees, 12 documents, 4 users.';
+PRINT 'Sample data inserted: 6 employees, 12 documents, 5 users.';
 GO
 
 /* ============================================================
