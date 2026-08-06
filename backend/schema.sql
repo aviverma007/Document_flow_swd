@@ -62,7 +62,7 @@ CREATE TABLE docflow.movements (
     from_holder_id  NVARCHAR(50) NULL REFERENCES docflow.employees(employee_id),
     to_holder_id    NVARCHAR(50) NULL REFERENCES docflow.employees(employee_id),
     requested_by    INT          NOT NULL REFERENCES docflow.users(user_id),
-    status          NVARCHAR(20) NOT NULL DEFAULT 'pending',
+    status          NVARCHAR(30) NOT NULL DEFAULT 'pending',
     approved_by     INT          NULL REFERENCES docflow.users(user_id),
     requested_at    DATETIME2    NOT NULL DEFAULT SYSDATETIME(),
     decided_at      DATETIME2    NULL,

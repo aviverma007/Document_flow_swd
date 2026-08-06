@@ -40,3 +40,12 @@ GO
 
 PRINT 'Migration complete: columns added, transferrer login ready (transfer / SmartWorld@2026).';
 GO
+
+/* ---- widen movement text columns so long stage names never truncate ---- */
+ALTER TABLE docflow.movements ALTER COLUMN status NVARCHAR(30) NULL;
+GO
+IF COL_LENGTH('docflow.movements','stage') < 80
+    ALTER TABLE docflow.movements ALTER COLUMN stage NVARCHAR(40) NULL;
+GO
+PRINT 'Movement columns widened.';
+GO
