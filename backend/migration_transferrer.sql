@@ -49,3 +49,9 @@ IF COL_LENGTH('docflow.movements','stage') < 80
 GO
 PRINT 'Movement columns widened.';
 GO
+
+/* ---- widen documents.status for the longer handoff state names ---- */
+ALTER TABLE docflow.documents ALTER COLUMN status NVARCHAR(30) NOT NULL;
+GO
+PRINT 'documents.status widened to 30.';
+GO

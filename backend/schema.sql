@@ -30,7 +30,7 @@ CREATE TABLE docflow.documents (
     flat_number        NVARCHAR(50)  NULL,
     doc_type           NVARCHAR(100) NULL,
     remarks            NVARCHAR(500) NULL,
-    status             NVARCHAR(20)  NOT NULL DEFAULT 'in_storage',
+    status             NVARCHAR(30)  NOT NULL DEFAULT 'in_storage',
     current_holder_id  NVARCHAR(50)  NULL REFERENCES docflow.employees(employee_id),
     updated_at         DATETIME2     NOT NULL DEFAULT SYSDATETIME()
 );
