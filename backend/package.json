@@ -8,7 +8,8 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "seed": "node seed.js",
-    "load-master": "node load_master.js"
+    "load-master": "node load_master.js",
+    "reset-admin": "node reset_admin.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
