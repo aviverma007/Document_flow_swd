@@ -257,5 +257,5 @@ app.post('/api/users/:id/reset-password', authRequired, adminOnly, async (req, r
 
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'docflow', time: new Date().toISOString() }));
 
-const PORT = process.env.PORT || 5096;
+const PORT = process.env.PORT || 5097;
 app.listen(PORT, '0.0.0.0', () => console.log(`Document Flow API on http://0.0.0.0:${PORT}`));
