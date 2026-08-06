@@ -51,7 +51,13 @@ PRINT 'Movement columns widened.';
 GO
 
 /* ---- widen documents.status for the longer handoff state names ---- */
+IF EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_documents_status' AND object_id=OBJECT_ID('docflow.documents'))
+    DROP INDEX IX_documents_status ON docflow.documents;
+GO
 ALTER TABLE docflow.documents ALTER COLUMN status NVARCHAR(30) NOT NULL;
 GO
-PRINT 'documents.status widened to 30.';
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_documents_status' AND object_id=OBJECT_ID('docflow.documents'))
+    CREATE INDEX IX_documents_status ON docflow.documents(status);
+GO
+PRINT 'documents.status widened to 30 and index rebuilt.';
 GO
