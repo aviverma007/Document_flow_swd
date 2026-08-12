@@ -100,6 +100,7 @@ function Login({ onLogin }) {
         <div className="field"><label>Password</label>
           <input type="password" value={password} onChange={e => setP(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} /></div>
         <button className="primary" style={{ width: '100%', marginTop: 4 }} onClick={submit} disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        <div className="login-foot">Developed &amp; created by <b>Anirudh Verma</b></div>
       </div>
     </div>
   );

@@ -241,3 +241,7 @@ tr:hover td { background: #f7f9fc; }
 
 /* card header with trailing button */
 .card h3 { align-items: center; }
+
+/* ---------- Login footer ---------- */
+.login-foot { margin-top: 20px; text-align: center; font-size: 12.5px; color: rgba(255,255,255,.55); }
+.login-foot b { color: rgba(255,255,255,.85); font-weight: 600; }
