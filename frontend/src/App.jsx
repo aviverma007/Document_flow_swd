@@ -394,9 +394,12 @@ function BrowseDocuments({ docs }) {
     <>
       <ProjectBar projects={projects} project={project} setProject={setProject} />
       {!project ? <ProjectPrompt /> : (
-        <div className="card"><h3><span className="live-dot" />{project} files ({list.length})</h3>
-          <div className="filters"><input placeholder="Search file no / flat / customer" value={search} onChange={e => setSearch(e.target.value)} />
+        <div className="card"><h3><span className="live-dot" />{project} files</h3>
+          <div className="filters"><input placeholder="Search file no / flat / customer" value={search} onChange={e => setSearch(e.target.value)} autoFocus />
             <select value={tower} onChange={e => setTower(e.target.value)}><option value="">All towers</option>{towers.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+          {!search.trim() ? (
+            <div className="empty">Type a file no, flat, or customer name to search {project} files.</div>
+          ) : (
           <div className="panel-scroll" style={{ maxHeight: 460 }}>
             <table><thead><tr><th>File No</th><th>Tower</th><th>Flat</th><th>Customer</th><th>Status</th><th className="right">Action</th></tr></thead>
               <tbody>
@@ -406,9 +409,10 @@ function BrowseDocuments({ docs }) {
                     : d.status === 'in_storage'
                       ? <button className="primary" onClick={() => run({ confirmTitle: 'Request this file?', confirmMsg: `Send a request to take ${d.document_id} (Tower ${d.tower}, Flat ${d.flat_number})? Admin will review it.`, confirmLabel: 'Request', path: '/api/movements/request-take', body: { document_id: d.document_id }, success: 'Request sent for admin approval' })}>Request to take</button>
                       : <span className="muted">Unavailable</span>}</td></tr>))}
-                {list.length === 0 && <tr><td colSpan={6} className="empty">No files match.</td></tr>}
+                {list.length === 0 && <tr><td colSpan={6} className="empty">No files match “{search}”.</td></tr>}
               </tbody></table>
           </div>
+          )}
         </div>
       )}
     </>
