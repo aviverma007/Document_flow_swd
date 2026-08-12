@@ -129,28 +129,167 @@ function ChangePassword({ forced, onDone }) {
   );
 }
 
-/* ================= Overview table (read-only) ================= */
+/* ================= Project-first browsing ================= */
+function ProjectBar({ projects, project, setProject }) {
+  return (
+    <div className="proj-bar">
+      <span className="proj-label">Project:</span>
+      {projects.map(p => (
+        <button key={p} className={'proj-chip' + (project === p ? ' on' : '')} onClick={() => setProject(project === p ? '' : p)}>{p}</button>
+      ))}
+    </div>
+  );
+}
+function ProjectPrompt() {
+  return <div className="card"><div className="empty">Select a project above to view its files.</div></div>;
+}
+
+// Read-only overview (admin overview when not editing, and transferrer)
 function OverviewTable({ docs, title }) {
+  const projects = [...new Set(docs.map(d => d.doc_type).filter(Boolean))].sort();
+  const [project, setProject] = useState('');
   const [tower, setTower] = useState(''); const [search, setSearch] = useState('');
-  const towers = [...new Set(docs.map(d => d.tower).filter(Boolean))].sort();
-  const list = docs.filter(d => (!tower || d.tower === tower) &&
-    (!search || `${d.document_id} ${d.flat_number} ${d.holder_name || ''}`.toLowerCase().includes(search.toLowerCase())));
+  const inProj = docs.filter(d => d.doc_type === project);
+  const towers = [...new Set(inProj.map(d => d.tower).filter(Boolean))].sort();
+  const list = inProj.filter(d => (!tower || d.tower === tower) &&
+    (!search || `${d.document_id} ${d.flat_number} ${d.remarks || ''} ${d.holder_name || ''}`.toLowerCase().includes(search.toLowerCase())));
+  return (
+    <>
+      <ProjectBar projects={projects} project={project} setProject={setProject} />
+      {!project ? <ProjectPrompt /> : (
+        <div className="card">
+          <h3><span className="live-dot" />{title} — {project} ({list.length})</h3>
+          <div className="filters">
+            <input placeholder="Search file no / flat / customer / holder" value={search} onChange={e => setSearch(e.target.value)} />
+            <select value={tower} onChange={e => setTower(e.target.value)}><option value="">All towers</option>{towers.map(t => <option key={t} value={t}>{t}</option>)}</select>
+          </div>
+          <div className="panel-scroll" style={{ maxHeight: 460 }}>
+            <table><thead><tr><th>File No</th><th>Tower</th><th>Flat</th><th>Customer</th><th>Status</th><th>Transferrer</th></tr></thead>
+              <tbody>
+                {list.map(d => (<tr key={d.document_id} className={d.record_status === 'cancelled' ? 'row-cancelled' : ''}>
+                  <td>{d.document_id}</td><td>{d.tower}</td><td>{d.flat_number}</td><td className="muted">{d.remarks || '—'}</td>
+                  <td><StatusBadge d={d} />{d.record_status === 'cancelled' && <span className="badge b-cancel" style={{ marginLeft: 6 }}>Cancelled</span>}</td>
+                  <td className="muted">{d.transferrer_name || '—'}</td></tr>))}
+                {list.length === 0 && <tr><td colSpan={6} className="empty">No files match.</td></tr>}
+              </tbody></table>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ================= Admin: documents (edit + add) ================= */
+function EditDocModal({ doc, onClose, onSaved }) {
+  const { notify } = useContext(UI);
+  const [fileNo, setFileNo] = useState(doc.document_id);
+  const [customer, setCustomer] = useState(doc.remarks || '');
+  const [tower, setTower] = useState(doc.tower || '');
+  const [flat, setFlat] = useState(doc.flat_number || '');
+  const [status, setStatus] = useState(doc.record_status || 'active');
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true);
+    try {
+      await api(`/api/documents/${encodeURIComponent(doc.document_id)}`, { method: 'PUT',
+        body: { file_no: fileNo, customer, tower, flat_number: flat, record_status: status } });
+      notify('success', 'Document updated'); onSaved();
+    } catch (e) { notify('error', e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 460 }} onClick={e => e.stopPropagation()}>
+        <h3>Edit file</h3>
+        <div className="field"><label>File No</label><input value={fileNo} onChange={e => setFileNo(e.target.value)} /></div>
+        <div className="field"><label>Customer name</label><input value={customer} onChange={e => setCustomer(e.target.value)} /></div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div className="field" style={{ flex: 1 }}><label>Tower</label><input value={tower} onChange={e => setTower(e.target.value)} /></div>
+          <div className="field" style={{ flex: 1 }}><label>Flat</label><input value={flat} onChange={e => setFlat(e.target.value)} /></div>
+        </div>
+        <div className="field"><label>Status</label>
+          <select value={status} onChange={e => setStatus(e.target.value)}><option value="active">Active</option><option value="cancelled">Cancelled</option></select></div>
+        <div className="m-actions"><button className="ghost" onClick={onClose}>Cancel</button><button className="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button></div>
+      </div>
+    </div>
+  );
+}
+
+function AddDocsPanel({ project, onClose, onSaved }) {
+  const { notify } = useContext(UI);
+  const [rows, setRows] = useState([{ file_no: '', tower: '', flat: '', customer: '' }]);
+  const [busy, setBusy] = useState(false);
+  const setRow = (i, k, v) => setRows(rs => rs.map((r, j) => j === i ? { ...r, [k]: v } : r));
+  const addLine = () => setRows(rs => [...rs, { file_no: '', tower: '', flat: '', customer: '' }]);
+  const delLine = (i) => setRows(rs => rs.filter((_, j) => j !== i));
+  async function saveAll() {
+    const documents = rows.filter(r => r.file_no.trim()).map(r => ({ document_id: r.file_no.trim(), tower: r.tower.trim(), flat_number: r.flat.trim(), doc_type: project, remarks: r.customer.trim() }));
+    if (!documents.length) return notify('error', 'Add at least one file no');
+    setBusy(true);
+    try {
+      const res = await api('/api/documents', { method: 'POST', body: { documents } });
+      notify('success', `${res.added} added${res.skipped.length ? `, ${res.skipped.length} skipped (already exist)` : ''}`);
+      onSaved();
+    } catch (e) { notify('error', e.message); } finally { setBusy(false); }
+  }
   return (
     <div className="card">
-      <h3><span className="live-dot" />{title} ({list.length})</h3>
-      <div className="filters">
-        <input placeholder="Search id / flat / holder" value={search} onChange={e => setSearch(e.target.value)} />
-        <select value={tower} onChange={e => setTower(e.target.value)}><option value="">All towers</option>{towers.map(t => <option key={t} value={t}>{t}</option>)}</select>
+      <h3>Add new files to {project}</h3>
+      <table><thead><tr><th>File No *</th><th>Tower</th><th>Flat</th><th>Customer</th><th></th></tr></thead>
+        <tbody>{rows.map((r, i) => (<tr key={i}>
+          <td><input value={r.file_no} onChange={e => setRow(i, 'file_no', e.target.value)} placeholder="e.g. EDN-9001" /></td>
+          <td><input value={r.tower} onChange={e => setRow(i, 'tower', e.target.value)} placeholder="T1" /></td>
+          <td><input value={r.flat} onChange={e => setRow(i, 'flat', e.target.value)} placeholder="101" /></td>
+          <td><input value={r.customer} onChange={e => setRow(i, 'customer', e.target.value)} placeholder="Customer name" /></td>
+          <td className="right">{rows.length > 1 && <button className="ghost" onClick={() => delLine(i)}>✕</button>}</td>
+        </tr>))}</tbody></table>
+      <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+        <button className="ghost" onClick={addLine}>＋ Add line</button>
+        <div style={{ flex: 1 }} />
+        <button className="ghost" onClick={onClose}>Cancel</button>
+        <button className="primary" onClick={saveAll} disabled={busy}>{busy ? 'Saving…' : 'Save all'}</button>
       </div>
-      <table>
-        <thead><tr><th>Document</th><th>Tower</th><th>Flat</th><th>Type</th><th>Status</th><th>Transferrer</th></tr></thead>
-        <tbody>
-          {list.map(d => (<tr key={d.document_id}><td>{d.document_id}</td><td>{d.tower}</td><td>{d.flat_number}</td>
-            <td className="muted">{d.doc_type || '—'}</td><td><StatusBadge d={d} /></td><td className="muted">{d.transferrer_name || '—'}</td></tr>))}
-          {list.length === 0 && <tr><td colSpan={6} className="empty">No documents.</td></tr>}
-        </tbody>
-      </table>
     </div>
+  );
+}
+
+function AdminDocuments({ docs, reload }) {
+  const projects = [...new Set(docs.map(d => d.doc_type).filter(Boolean))].sort();
+  const [project, setProject] = useState('');
+  const [tower, setTower] = useState(''); const [search, setSearch] = useState('');
+  const [editing, setEditing] = useState(null); const [adding, setAdding] = useState(false);
+  const inProj = docs.filter(d => d.doc_type === project);
+  const towers = [...new Set(inProj.map(d => d.tower).filter(Boolean))].sort();
+  const list = inProj.filter(d => (!tower || d.tower === tower) &&
+    (!search || `${d.document_id} ${d.flat_number} ${d.remarks || ''} ${d.holder_name || ''}`.toLowerCase().includes(search.toLowerCase())));
+  return (
+    <>
+      <ProjectBar projects={projects} project={project} setProject={p => { setProject(p); setAdding(false); }} />
+      {!project ? <ProjectPrompt /> : (
+        <>
+          {adding && <AddDocsPanel project={project} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); reload(); }} />}
+          <div className="card">
+            <h3><span className="live-dot" />{project} files ({list.length})
+              <button className="primary" style={{ marginLeft: 'auto', padding: '6px 12px' }} onClick={() => setAdding(a => !a)}>＋ Add documents</button>
+            </h3>
+            <div className="filters">
+              <input placeholder="Search file no / flat / customer / holder" value={search} onChange={e => setSearch(e.target.value)} />
+              <select value={tower} onChange={e => setTower(e.target.value)}><option value="">All towers</option>{towers.map(t => <option key={t} value={t}>{t}</option>)}</select>
+            </div>
+            <div className="panel-scroll" style={{ maxHeight: 440 }}>
+              <table><thead><tr><th>File No</th><th>Tower</th><th>Flat</th><th>Customer</th><th>Status</th><th className="right">Edit</th></tr></thead>
+                <tbody>
+                  {list.map(d => (<tr key={d.document_id} className={d.record_status === 'cancelled' ? 'row-cancelled' : ''}>
+                    <td>{d.document_id}</td><td>{d.tower}</td><td>{d.flat_number}</td><td className="muted">{d.remarks || '—'}</td>
+                    <td><StatusBadge d={d} />{d.record_status === 'cancelled' && <span className="badge b-cancel" style={{ marginLeft: 6 }}>Cancelled</span>}</td>
+                    <td className="right"><button className="ghost" onClick={() => setEditing(d)}>Edit</button></td></tr>))}
+                  {list.length === 0 && <tr><td colSpan={6} className="empty">No files match.</td></tr>}
+                </tbody></table>
+            </div>
+          </div>
+        </>
+      )}
+      {editing && <EditDocModal doc={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
+    </>
   );
 }
 
@@ -232,7 +371,7 @@ function TransferrerTransit({ docs, user }) {
           {list.map(d => {
             const isOut = d.status === 'out_in_transit';
             const to = isOut ? d.pending_name : 'Storage room';
-            const confirmMsg = isOut ? `Confirm you dropped ${d.document_id} to ${d.pending_name}? They will confirm receipt.` : `Confirm you dropped ${d.document_id} at storage? Admin will confirm receipt.`;
+            const confirmMsg = isOut ? `Confirm you dropped ${d.document_id} to ${d.pending_name}? It goes straight into their custody.` : `Confirm you dropped ${d.document_id} at storage? Admin will confirm receipt.`;
             return (<tr key={d.document_id}><td>{d.document_id}</td><td className="muted">{d.tower} · {d.flat_number}</td><td>{to}</td>
               <td className="right"><button className="primary" onClick={() => run({ confirmTitle: 'Mark as dropped?', confirmMsg, confirmLabel: 'Dropped', path: '/api/transferrer/dropped', body: { document_id: d.document_id }, success: 'Marked as dropped' })}>Dropped</button></td></tr>);
           })}
@@ -244,21 +383,35 @@ function TransferrerTransit({ docs, user }) {
 /* ================= User ================= */
 function BrowseDocuments({ docs }) {
   const { run } = useContext(UI);
+  const projects = [...new Set(docs.map(d => d.doc_type).filter(Boolean))].sort();
+  const [project, setProject] = useState('');
   const [search, setSearch] = useState(''); const [tower, setTower] = useState('');
-  const towers = [...new Set(docs.map(d => d.tower).filter(Boolean))].sort();
-  const list = docs.filter(d => (!tower || d.tower === tower) && (!search || `${d.document_id} ${d.flat_number}`.toLowerCase().includes(search.toLowerCase())));
+  const inProj = docs.filter(d => d.doc_type === project);
+  const towers = [...new Set(inProj.map(d => d.tower).filter(Boolean))].sort();
+  const list = inProj.filter(d => (!tower || d.tower === tower) &&
+    (!search || `${d.document_id} ${d.flat_number} ${d.remarks || ''}`.toLowerCase().includes(search.toLowerCase())));
   return (
-    <div className="card"><h3><span className="live-dot" />All documents ({list.length})</h3>
-      <div className="filters"><input placeholder="Search id / flat" value={search} onChange={e => setSearch(e.target.value)} />
-        <select value={tower} onChange={e => setTower(e.target.value)}><option value="">All towers</option>{towers.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-      <table><thead><tr><th>Document</th><th>Tower</th><th>Flat</th><th>Status</th><th className="right">Action</th></tr></thead>
-        <tbody>
-          {list.map(d => (<tr key={d.document_id}><td>{d.document_id}</td><td>{d.tower}</td><td>{d.flat_number}</td><td><StatusBadge d={d} /></td>
-            <td className="right">{d.status === 'in_storage'
-              ? <button className="primary" onClick={() => run({ confirmTitle: 'Request this document?', confirmMsg: `Send a request to take ${d.document_id} (Tower ${d.tower}, Flat ${d.flat_number})? Admin will review it.`, confirmLabel: 'Request', path: '/api/movements/request-take', body: { document_id: d.document_id }, success: 'Request sent for admin approval' })}>Request to take</button>
-              : <span className="muted">Unavailable</span>}</td></tr>))}
-          {list.length === 0 && <tr><td colSpan={5} className="empty">No documents match.</td></tr>}
-        </tbody></table></div>
+    <>
+      <ProjectBar projects={projects} project={project} setProject={setProject} />
+      {!project ? <ProjectPrompt /> : (
+        <div className="card"><h3><span className="live-dot" />{project} files ({list.length})</h3>
+          <div className="filters"><input placeholder="Search file no / flat / customer" value={search} onChange={e => setSearch(e.target.value)} />
+            <select value={tower} onChange={e => setTower(e.target.value)}><option value="">All towers</option>{towers.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+          <div className="panel-scroll" style={{ maxHeight: 460 }}>
+            <table><thead><tr><th>File No</th><th>Tower</th><th>Flat</th><th>Customer</th><th>Status</th><th className="right">Action</th></tr></thead>
+              <tbody>
+                {list.map(d => (<tr key={d.document_id} className={d.record_status === 'cancelled' ? 'row-cancelled' : ''}>
+                  <td>{d.document_id}</td><td>{d.tower}</td><td>{d.flat_number}</td><td className="muted">{d.remarks || '—'}</td><td><StatusBadge d={d} /></td>
+                  <td className="right">{d.record_status === 'cancelled' ? <span className="badge b-cancel">Cancelled</span>
+                    : d.status === 'in_storage'
+                      ? <button className="primary" onClick={() => run({ confirmTitle: 'Request this file?', confirmMsg: `Send a request to take ${d.document_id} (Tower ${d.tower}, Flat ${d.flat_number})? Admin will review it.`, confirmLabel: 'Request', path: '/api/movements/request-take', body: { document_id: d.document_id }, success: 'Request sent for admin approval' })}>Request to take</button>
+                      : <span className="muted">Unavailable</span>}</td></tr>))}
+                {list.length === 0 && <tr><td colSpan={6} className="empty">No files match.</td></tr>}
+              </tbody></table>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 function MyDocuments({ user }) {
@@ -266,20 +419,10 @@ function MyDocuments({ user }) {
   const [docs, setDocs] = useState([]);
   const load = useCallback(() => api('/api/documents/mine').then(setDocs).catch(() => {}), []);
   useEffect(() => { load(); const t = setInterval(load, POLL_MS); return () => clearInterval(t); }, [load]);
-  const toReceive = docs.filter(d => d.status === 'out_delivered' && d.pending_holder_id === user.employee_id);
   const custody = docs.filter(d => ['with_employee', 'return_awaiting_pickup', 'return_in_transit', 'return_delivered'].includes(d.status) && d.current_holder_id === user.employee_id);
   const incoming = docs.filter(d => ['out_admin_review', 'out_awaiting_pickup', 'out_in_transit'].includes(d.status) && d.pending_holder_id === user.employee_id);
   return (
     <>
-      {toReceive.length > 0 && (
-        <div className="card"><h3>Awaiting your confirmation ({toReceive.length})</h3>
-          <table><thead><tr><th>Document</th><th>Tower / Flat</th><th>Delivered by</th><th className="right">Did you get it?</th></tr></thead>
-            <tbody>{toReceive.map(d => (<tr key={d.document_id}><td>{d.document_id}</td><td className="muted">{d.tower} · {d.flat_number}</td><td className="muted">{d.transferrer_name || '—'}</td>
-              <td className="right">
-                <button className="primary" onClick={() => run({ confirmTitle: 'Confirm received?', confirmMsg: `Confirm you received ${d.document_id}? It will be logged in your custody.`, confirmLabel: 'Received', path: '/api/user/received', body: { document_id: d.document_id, received: true }, success: 'Document is now in your custody', after: load })}>Received</button>{' '}
-                <button className="ghost" onClick={() => run({ confirmTitle: 'Not received?', confirmMsg: `Report that ${d.document_id} was NOT handed to you? It goes back to the transferrer.`, confirmLabel: 'Not received', path: '/api/user/received', body: { document_id: d.document_id, received: false }, success: 'Sent back to the transferrer', after: load })}>Not received</button>
-              </td></tr>))}</tbody></table></div>
-      )}
       <div className="card fixed-panel"><h3>In my custody ({custody.length})</h3>
         <div className="panel-scroll">
         <table><thead><tr><th>Document</th><th>Tower</th><th>Flat</th><th>Status</th><th className="right">Action</th></tr></thead>
@@ -449,7 +592,7 @@ export default function App() {
             <div className="right"><NotifBell notif={notif} /><span className="live-pill"><span className="g" />LIVE</span><span className="date">{today}</span></div>
           </div>
           <div className="page">
-            {user.role === 'admin' && tab === 'documents' && <OverviewTable docs={docs} title="Live document locations" />}
+            {user.role === 'admin' && tab === 'documents' && <AdminDocuments docs={docs} reload={reload} />}
             {user.role === 'admin' && tab === 'approvals' && <AdminApprovals docs={docs} />}
             {user.role === 'admin' && tab === 'receiving' && <AdminReceiving docs={docs} />}
             {user.role === 'admin' && tab === 'users' && <Users />}

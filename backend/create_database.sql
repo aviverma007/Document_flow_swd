@@ -44,6 +44,7 @@ CREATE TABLE docflow.documents (
     current_holder_id   NVARCHAR(50)  NULL,
     pending_holder_id   NVARCHAR(50)  NULL,
     transferrer_user_id INT           NULL,
+    record_status       NVARCHAR(10)  NOT NULL DEFAULT 'active',
     updated_at          DATETIME2     NOT NULL DEFAULT SYSDATETIME(),
     CONSTRAINT FK_documents_holder FOREIGN KEY (current_holder_id)
         REFERENCES docflow.employees(employee_id)

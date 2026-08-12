@@ -61,3 +61,10 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_documents_status' AND ob
 GO
 PRINT 'documents.status widened to 30 and index rebuilt.';
 GO
+
+/* ---- document active/cancelled flag ---- */
+IF COL_LENGTH('docflow.documents','record_status') IS NULL
+    ALTER TABLE docflow.documents ADD record_status NVARCHAR(10) NOT NULL DEFAULT 'active';
+GO
+PRINT 'record_status column ready.';
+GO

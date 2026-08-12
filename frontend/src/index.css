@@ -224,3 +224,18 @@ tr:hover td { background: #f7f9fc; }
 /* keep the page from scrolling the whole layout */
 .content { height: 100vh; overflow: hidden; }
 .page { flex: 1; overflow-y: auto; }
+
+/* ---------- Project selector ---------- */
+.proj-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.proj-label { color: var(--muted); font-size: 13px; font-weight: 600; }
+.proj-chip { border-radius: 22px; padding: 9px 20px; font-weight: 600; background: #fff; border: 1px solid var(--line); }
+.proj-chip:hover { border-color: var(--sw-blue); color: var(--sw-blue); }
+.proj-chip.on { background: var(--sw-blue); border-color: var(--sw-blue); color: #fff; }
+
+/* ---------- Cancelled ---------- */
+.b-cancel { background: #fdecec; color: #a32d2d; }
+.row-cancelled td { opacity: .55; }
+.row-cancelled td:first-child { text-decoration: line-through; }
+
+/* card header with trailing button */
+.card h3 { align-items: center; }

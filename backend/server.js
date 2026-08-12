@@ -78,7 +78,7 @@ app.post('/api/auth/change-password', authRequired, async (req, res) => {
 
 /* ---------------- DOCUMENTS ---------------- */
 const DOC_SELECT = `
-  SELECT d.document_id, d.tower, d.flat_number, d.doc_type, d.remarks, d.status,
+  SELECT d.document_id, d.tower, d.flat_number, d.doc_type, d.remarks, d.status, d.record_status,
          d.current_holder_id, e.name AS holder_name,
          d.pending_holder_id, pe.name AS pending_name,
          d.transferrer_user_id, tu.username AS transferrer_name, d.updated_at
@@ -120,7 +120,7 @@ app.get('/api/notifications', authRequired, async (req, res) => {
   try { const pool = await getPool(); let where = '1=0'; const rq = q(pool);
     if (req.user.role === 'admin') where = `d.status IN ('out_admin_review','return_delivered')`;
     else if (req.user.role === 'transferrer') where = `d.status IN ('out_awaiting_pickup','return_awaiting_pickup','out_in_transit','return_in_transit')`;
-    else { where = `d.status = 'out_delivered' AND d.pending_holder_id = @emp`; rq.input('emp', sql.NVarChar, req.user.employee_id); }
+    else where = '1=0'; // users have no approval queue in this flow
     const r = await rq.query(`${DOC_SELECT} WHERE ${where} ORDER BY d.updated_at DESC`);
     res.json({ count: r.recordset.length, list: r.recordset });
   } catch (e) { res.status(500).json({ error: 'Failed', detail: e.message }); }
@@ -137,23 +137,6 @@ app.post('/api/movements/request-take', authRequired, roleOnly('user'), async (r
     await logEvent(pool, { document_id, action: 'issue', stage: 'requested', actor_id: req.user.user_id, to_holder: req.user.employee_id });
     res.json({ ok: true });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Request failed', detail: e.message }); }
-});
-
-app.post('/api/user/received', authRequired, roleOnly('user'), async (req, res) => {
-  const { document_id, received } = req.body || {};
-  try { const pool = await getPool(); const doc = await getDoc(pool, document_id);
-    if (!doc) return res.status(404).json({ error: 'Document not found' });
-    if (doc.status !== 'out_delivered' || doc.pending_holder_id !== req.user.employee_id)
-      return res.status(409).json({ error: 'This document is not awaiting your confirmation' });
-    if (received) {
-      await setDoc(pool, document_id, { status: 'with_employee', current_holder_id: doc.pending_holder_id, pending_holder_id: null, transferrer_user_id: null });
-      await logEvent(pool, { document_id, action: 'issue', stage: 'received', actor_id: req.user.user_id, to_holder: doc.pending_holder_id });
-    } else {
-      await setDoc(pool, document_id, { status: 'out_in_transit' });
-      await logEvent(pool, { document_id, action: 'issue', stage: 'not_received', actor_id: req.user.user_id });
-    }
-    res.json({ ok: true });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'Failed', detail: e.message }); }
 });
 
 app.post('/api/movements/request-return', authRequired, roleOnly('user'), async (req, res) => {
@@ -218,12 +201,15 @@ app.post('/api/transferrer/dropped', authRequired, roleOnly('transferrer'), asyn
   const { document_id } = req.body || {};
   try { const pool = await getPool(); const doc = await getDoc(pool, document_id);
     if (!doc) return res.status(404).json({ error: 'Document not found' });
-    let next, action;
-    if (doc.status === 'out_in_transit') { next = 'out_delivered'; action = 'issue'; }
-    else if (doc.status === 'return_in_transit') { next = 'return_delivered'; action = 'return'; }
-    else return res.status(409).json({ error: 'This document is not in transit' });
-    await setDoc(pool, document_id, { status: next });
-    await logEvent(pool, { document_id, action, stage: 'dropped', actor_id: req.user.user_id });
+    if (doc.status === 'out_in_transit') {
+      // issue leg: dropped to employee -> straight into custody, no confirmation
+      await setDoc(pool, document_id, { status: 'with_employee', current_holder_id: doc.pending_holder_id, pending_holder_id: null, transferrer_user_id: null });
+      await logEvent(pool, { document_id, action: 'issue', stage: 'delivered', actor_id: req.user.user_id, to_holder: doc.pending_holder_id });
+    } else if (doc.status === 'return_in_transit') {
+      // return leg: dropped at storage -> waits for admin to confirm receipt
+      await setDoc(pool, document_id, { status: 'return_delivered' });
+      await logEvent(pool, { document_id, action: 'return', stage: 'dropped', actor_id: req.user.user_id });
+    } else return res.status(409).json({ error: 'This document is not in transit' });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: 'Failed', detail: e.message }); }
 });
@@ -253,6 +239,72 @@ app.post('/api/users/:id/reset-password', authRequired, adminOnly, async (req, r
       .query('UPDATE docflow.users SET password_hash = @h, must_change_password = 1 WHERE user_id = @id');
     res.json({ ok: true, default_password: def });
   } catch (e) { res.status(500).json({ error: 'Failed', detail: e.message }); }
+});
+
+/* ---------------- ADMIN: manage documents ---------------- */
+// Edit customer/file-no/tower/flat/active-cancelled. Supports renaming the file no.
+app.put('/api/documents/:id', authRequired, adminOnly, async (req, res) => {
+  const id = req.params.id;
+  const { file_no, customer, tower, flat_number, record_status } = req.body || {};
+  try {
+    const pool = await getPool();
+    const doc = await getDoc(pool, id);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const newId = (file_no || '').trim();
+    const renaming = newId && newId !== id;
+
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+      let finalId = id;
+      if (renaming) {
+        const ex = await new sql.Request(tx).input('n', sql.NVarChar, newId)
+          .query('SELECT 1 FROM docflow.documents WHERE document_id = @n');
+        if (ex.recordset.length) throw new Error('A document with that file no already exists');
+        await new sql.Request(tx).input('old', sql.NVarChar, id).input('new', sql.NVarChar, newId).query(`
+          INSERT INTO docflow.documents (document_id, tower, flat_number, doc_type, remarks, status, current_holder_id, pending_holder_id, transferrer_user_id, record_status, updated_at)
+          SELECT @new, tower, flat_number, doc_type, remarks, status, current_holder_id, pending_holder_id, transferrer_user_id, record_status, SYSDATETIME()
+          FROM docflow.documents WHERE document_id = @old;
+          UPDATE docflow.movements SET document_id = @new WHERE document_id = @old;
+          DELETE FROM docflow.documents WHERE document_id = @old;`);
+        finalId = newId;
+      }
+      const sets = ['updated_at = SYSDATETIME()']; const rq = new sql.Request(tx).input('id', sql.NVarChar, finalId);
+      if (customer !== undefined) { sets.push('remarks = @rem'); rq.input('rem', sql.NVarChar, customer); }
+      if (tower !== undefined) { sets.push('tower = @tw'); rq.input('tw', sql.NVarChar, tower); }
+      if (flat_number !== undefined) { sets.push('flat_number = @fl'); rq.input('fl', sql.NVarChar, flat_number); }
+      if (record_status !== undefined) { sets.push('record_status = @rs'); rq.input('rs', sql.NVarChar, record_status === 'cancelled' ? 'cancelled' : 'active'); }
+      await rq.query(`UPDATE docflow.documents SET ${sets.join(', ')} WHERE document_id = @id`);
+      await tx.commit();
+      res.json({ ok: true, document_id: finalId });
+    } catch (e) { await tx.rollback(); throw e; }
+  } catch (e) { console.error(e); res.status(500).json({ error: e.message || 'Update failed' }); }
+});
+
+// Bulk add new documents (the "add line" flow)
+app.post('/api/documents', authRequired, adminOnly, async (req, res) => {
+  const { documents } = req.body || {};
+  if (!Array.isArray(documents) || documents.length === 0) return res.status(400).json({ error: 'No documents provided' });
+  try {
+    const pool = await getPool();
+    let added = 0; const skipped = [];
+    for (const d of documents) {
+      const did = (d.document_id || '').trim();
+      if (!did) continue;
+      const ex = await q(pool).input('id', sql.NVarChar, did).query('SELECT 1 FROM docflow.documents WHERE document_id = @id');
+      if (ex.recordset.length) { skipped.push(did); continue; }
+      await q(pool)
+        .input('id', sql.NVarChar, did)
+        .input('tw', sql.NVarChar, d.tower || null)
+        .input('fl', sql.NVarChar, d.flat_number || null)
+        .input('ty', sql.NVarChar, d.doc_type || null)
+        .input('rem', sql.NVarChar, d.remarks || null)
+        .query(`INSERT INTO docflow.documents (document_id, tower, flat_number, doc_type, remarks, status, record_status)
+                VALUES (@id, @tw, @fl, @ty, @rem, 'in_storage', 'active')`);
+      added++;
+    }
+    res.json({ ok: true, added, skipped });
+  } catch (e) { console.error(e); res.status(500).json({ error: e.message || 'Add failed' }); }
 });
 
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'docflow', time: new Date().toISOString() }));
