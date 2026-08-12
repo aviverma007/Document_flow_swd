@@ -447,6 +447,72 @@ function MyDocuments({ user }) {
   );
 }
 
+/* ================= Admin: custody report ================= */
+const STAGE_LABEL = {
+  requested: 'Requested', admin_approved: 'Approved by admin', accepted: 'Picked up by transferrer',
+  delivered: 'Delivered to employee', received: 'Received by employee', not_received: 'Not received',
+  return_requested: 'Return requested', dropped: 'Dropped at storage', admin_received: 'Received into storage',
+  rejected: 'Rejected',
+};
+function whereNow(row) {
+  return statusInfo({ status: row.current_status, holder_name: row.current_holder_name, pending_name: row.pending_name });
+}
+function Report() {
+  const [rows, setRows] = useState([]);
+  const [search, setSearch] = useState(''); const [emp, setEmp] = useState('');
+  const [from, setFrom] = useState(''); const [to, setTo] = useState('');
+  const load = useCallback(() => api('/api/report/custody').then(setRows).catch(() => {}), []);
+  useEffect(() => { load(); const t = setInterval(load, POLL_MS); return () => clearInterval(t); }, [load]);
+
+  const list = rows.filter(r => {
+    if (search && !`${r.document_id} ${r.flat_number} ${r.remarks || ''}`.toLowerCase().includes(search.toLowerCase())) return false;
+    if (emp && !`${r.emp_name || ''} ${r.emp_id || ''}`.toLowerCase().includes(emp.toLowerCase())) return false;
+    const at = new Date(r.at);
+    if (from && at < new Date(from)) return false;
+    if (to) { const end = new Date(to); end.setHours(23, 59, 59); if (at > end) return false; }
+    return true;
+  });
+
+  function exportCsv() {
+    const head = ['File No', 'Project', 'Tower', 'Flat', 'Customer', 'Event', 'Employee', 'By', 'When', 'Current location'];
+    const lines = [head.join(',')].concat(list.map(r => [
+      r.document_id, r.doc_type, r.tower, r.flat_number, r.remarks, STAGE_LABEL[r.stage] || r.stage,
+      r.emp_name || '', r.actor || '', new Date(r.at).toLocaleString(), whereNow(r).label
+    ].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')));
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = `custody_report_${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="card">
+      <h3><span className="live-dot" />Custody report ({list.length})
+        <button className="ghost" style={{ marginLeft: 'auto' }} onClick={exportCsv}>⭳ Export CSV</button></h3>
+      <div className="filters">
+        <input placeholder="File no / flat / customer" value={search} onChange={e => setSearch(e.target.value)} />
+        <input placeholder="Employee name / id" value={emp} onChange={e => setEmp(e.target.value)} />
+        <input type="date" value={from} onChange={e => setFrom(e.target.value)} title="From date" />
+        <input type="date" value={to} onChange={e => setTo(e.target.value)} title="To date" />
+      </div>
+      <div className="panel-scroll" style={{ maxHeight: 480 }}>
+        <table><thead><tr><th>File No</th><th>Tower/Flat</th><th>Customer</th><th>Event</th><th>Employee</th><th>By</th><th>When</th><th>Where now</th></tr></thead>
+          <tbody>
+            {list.map(r => (<tr key={r.movement_id}>
+              <td>{r.document_id}</td><td className="muted">{r.tower} · {r.flat_number}</td>
+              <td className="muted">{r.remarks || '—'}</td>
+              <td>{STAGE_LABEL[r.stage] || r.stage}</td>
+              <td>{r.emp_name || '—'}</td>
+              <td className="muted">{r.actor || '—'}</td>
+              <td className="muted">{new Date(r.at).toLocaleString()}</td>
+              <td><span className={'badge ' + whereNow(r).cls}>{whereNow(r).label}</span></td>
+            </tr>))}
+            {list.length === 0 && <tr><td colSpan={8} className="empty">No custody events match.</td></tr>}
+          </tbody></table>
+      </div>
+    </div>
+  );
+}
+
 /* ================= Sidebar / bell / modal / toasts ================= */
 function Sidebar({ user, items, tab, setTab, collapsed, onToggle, onSettings, onLogout }) {
   const initials = (user.username || '?').slice(0, 2).toUpperCase();
@@ -570,6 +636,7 @@ export default function App() {
       { key: 'documents', label: 'Documents', icon: <IHome /> },
       { key: 'approvals', label: 'Approvals', icon: <ICheck />, badge: c.approvals },
       { key: 'receiving', label: 'Receiving', icon: <IInbox />, badge: c.receiving },
+      { key: 'report', label: 'Report', icon: <IFile /> },
       { key: 'users', label: 'Users', icon: <IUsers /> },
     ],
     transferrer: [
@@ -583,7 +650,7 @@ export default function App() {
     ],
   };
   const items = itemsByRole[user.role] || itemsByRole.user;
-  const titles = { documents: 'Live Document Locations', approvals: 'Issue Approvals', receiving: 'Returns Receiving', users: 'User Management', pickups: 'Pickup Requests', transit: 'In Transit', browse: 'All Documents', mine: 'My Custody', password: 'Account Settings' };
+  const titles = { documents: 'Live Document Locations', approvals: 'Issue Approvals', receiving: 'Returns Receiving', report: 'Custody Report', users: 'User Management', pickups: 'Pickup Requests', transit: 'In Transit', browse: 'All Documents', mine: 'My Custody', password: 'Account Settings' };
   const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
   return (
@@ -599,6 +666,7 @@ export default function App() {
             {user.role === 'admin' && tab === 'documents' && <AdminDocuments docs={docs} reload={reload} />}
             {user.role === 'admin' && tab === 'approvals' && <AdminApprovals docs={docs} />}
             {user.role === 'admin' && tab === 'receiving' && <AdminReceiving docs={docs} />}
+            {user.role === 'admin' && tab === 'report' && <Report />}
             {user.role === 'admin' && tab === 'users' && <Users />}
             {user.role === 'transferrer' && tab === 'pickups' && <TransferrerPickups docs={docs} />}
             {user.role === 'transferrer' && tab === 'transit' && <TransferrerTransit docs={docs} user={user} />}

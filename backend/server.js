@@ -307,6 +307,29 @@ app.post('/api/documents', authRequired, adminOnly, async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ error: e.message || 'Add failed' }); }
 });
 
+/* ---------------- ADMIN: custody report ---------------- */
+app.get('/api/report/custody', authRequired, adminOnly, async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await q(pool).query(`
+      SELECT TOP 2000
+        m.movement_id, m.document_id, d.tower, d.flat_number, d.doc_type, d.remarks,
+        d.status AS current_status, d.current_holder_id, ch.name AS current_holder_name,
+        d.pending_holder_id, ph.name AS pending_name,
+        m.action, m.stage,
+        COALESCE(m.to_holder_id, m.from_holder_id) AS emp_id, ee.name AS emp_name,
+        u.username AS actor, m.requested_at AS at
+      FROM docflow.movements m
+      JOIN docflow.documents d ON d.document_id = m.document_id
+      LEFT JOIN docflow.employees ee ON ee.employee_id = COALESCE(m.to_holder_id, m.from_holder_id)
+      LEFT JOIN docflow.employees ch ON ch.employee_id = d.current_holder_id
+      LEFT JOIN docflow.employees ph ON ph.employee_id = d.pending_holder_id
+      LEFT JOIN docflow.users u ON u.user_id = m.actor_id
+      ORDER BY m.requested_at DESC, m.movement_id DESC`);
+    res.json(r.recordset);
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Report failed', detail: e.message }); }
+});
+
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'docflow', time: new Date().toISOString() }));
 
 const PORT = process.env.PORT || 5097;
