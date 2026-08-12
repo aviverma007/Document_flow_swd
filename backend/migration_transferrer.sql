@@ -68,3 +68,24 @@ IF COL_LENGTH('docflow.documents','record_status') IS NULL
 GO
 PRINT 'record_status column ready.';
 GO
+
+/* ---- request reason / document name + employee notifications ---- */
+IF COL_LENGTH('docflow.documents','request_reason') IS NULL
+    ALTER TABLE docflow.documents ADD request_reason NVARCHAR(500) NULL;
+GO
+IF COL_LENGTH('docflow.documents','request_doc_name') IS NULL
+    ALTER TABLE docflow.documents ADD request_doc_name NVARCHAR(200) NULL;
+GO
+IF OBJECT_ID('docflow.notifications','U') IS NULL
+CREATE TABLE docflow.notifications (
+    id           INT IDENTITY(1,1) PRIMARY KEY,
+    employee_id  NVARCHAR(50)  NULL REFERENCES docflow.employees(employee_id),
+    document_id  NVARCHAR(50)  NULL,
+    type         NVARCHAR(30)  NULL,
+    message      NVARCHAR(1000) NULL,
+    created_at   DATETIME2     NOT NULL DEFAULT SYSDATETIME(),
+    seen         BIT           NOT NULL DEFAULT 0
+);
+GO
+PRINT 'Request-reason columns + notifications table ready.';
+GO

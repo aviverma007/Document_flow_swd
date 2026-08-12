@@ -15,17 +15,18 @@ function roleOnly(...roles) {
 }
 
 /* Append an event to the custody log */
-async function logEvent(pool, { document_id, action, stage, actor_id, from_holder = null, to_holder = null }) {
+async function logEvent(pool, { document_id, action, stage, actor_id, from_holder = null, to_holder = null, remarks = null }) {
   const r = q(pool)
     .input('doc', sql.NVarChar, document_id)
     .input('act', sql.NVarChar, action)
     .input('stg', sql.NVarChar, stage)
     .input('actor', sql.Int, actor_id)
     .input('from', sql.NVarChar, from_holder)
-    .input('to', sql.NVarChar, to_holder);
+    .input('to', sql.NVarChar, to_holder)
+    .input('rem', sql.NVarChar, remarks);
   await r.query(`INSERT INTO docflow.movements
-    (document_id, action, stage, actor_id, requested_by, from_holder_id, to_holder_id, status, decided_at)
-    VALUES (@doc, @act, @stg, @actor, @actor, @from, @to, @stg, SYSDATETIME())`);
+    (document_id, action, stage, actor_id, requested_by, from_holder_id, to_holder_id, status, remarks, decided_at)
+    VALUES (@doc, @act, @stg, @actor, @actor, @from, @to, @stg, @rem, SYSDATETIME())`);
 }
 
 async function getDoc(pool, id) {
@@ -38,6 +39,8 @@ async function setDoc(pool, id, fields) {
   if ('current_holder_id' in fields) { sets.push('current_holder_id = @chi'); rq.input('chi', sql.NVarChar, fields.current_holder_id); }
   if ('pending_holder_id' in fields) { sets.push('pending_holder_id = @phi'); rq.input('phi', sql.NVarChar, fields.pending_holder_id); }
   if ('transferrer_user_id' in fields) { sets.push('transferrer_user_id = @tui'); rq.input('tui', sql.Int, fields.transferrer_user_id); }
+  if ('request_reason' in fields) { sets.push('request_reason = @rr'); rq.input('rr', sql.NVarChar, fields.request_reason); }
+  if ('request_doc_name' in fields) { sets.push('request_doc_name = @rdn'); rq.input('rdn', sql.NVarChar, fields.request_doc_name); }
   sets.push('updated_at = SYSDATETIME()');
   await rq.query(`UPDATE docflow.documents SET ${sets.join(', ')} WHERE document_id = @doc`);
 }
@@ -79,6 +82,7 @@ app.post('/api/auth/change-password', authRequired, async (req, res) => {
 /* ---------------- DOCUMENTS ---------------- */
 const DOC_SELECT = `
   SELECT d.document_id, d.tower, d.flat_number, d.doc_type, d.remarks, d.status, d.record_status,
+         d.request_reason, d.request_doc_name,
          d.current_holder_id, e.name AS holder_name,
          d.pending_holder_id, pe.name AS pending_name,
          d.transferrer_user_id, tu.username AS transferrer_name, d.updated_at
@@ -128,13 +132,18 @@ app.get('/api/notifications', authRequired, async (req, res) => {
 
 /* ---------------- USER actions ---------------- */
 app.post('/api/movements/request-take', authRequired, roleOnly('user'), async (req, res) => {
-  const { document_id } = req.body || {};
+  const { document_id, reason, doc_name } = req.body || {};
   if (!req.user.employee_id) return res.status(400).json({ error: 'Your login is not linked to an employee' });
+  if (!reason || !reason.trim()) return res.status(400).json({ error: 'Please give a reason for the request' });
+  if (!doc_name || !doc_name.trim()) return res.status(400).json({ error: 'Please enter the document name' });
   try { const pool = await getPool(); const doc = await getDoc(pool, document_id);
     if (!doc) return res.status(404).json({ error: 'Document not found' });
     if (doc.status !== 'in_storage') return res.status(409).json({ error: 'Document is not available' });
-    await setDoc(pool, document_id, { status: 'out_admin_review', pending_holder_id: req.user.employee_id });
-    await logEvent(pool, { document_id, action: 'issue', stage: 'requested', actor_id: req.user.user_id, to_holder: req.user.employee_id });
+    if (doc.record_status === 'cancelled') return res.status(409).json({ error: 'This file is cancelled' });
+    await setDoc(pool, document_id, { status: 'out_admin_review', pending_holder_id: req.user.employee_id,
+      request_reason: reason.trim(), request_doc_name: doc_name.trim() });
+    await logEvent(pool, { document_id, action: 'issue', stage: 'requested', actor_id: req.user.user_id,
+      to_holder: req.user.employee_id, remarks: `${doc_name.trim()} — ${reason.trim()}` });
     res.json({ ok: true });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Request failed', detail: e.message }); }
 });
@@ -163,13 +172,24 @@ app.post('/api/admin/approve', authRequired, adminOnly, async (req, res) => {
 });
 
 app.post('/api/admin/reject', authRequired, adminOnly, async (req, res) => {
-  const { document_id } = req.body || {};
+  const { document_id, note } = req.body || {};
+  if (!note || !note.trim()) return res.status(400).json({ error: 'Please add a note explaining the rejection' });
   try { const pool = await getPool(); const doc = await getDoc(pool, document_id);
     if (!doc || doc.status !== 'out_admin_review') return res.status(409).json({ error: 'No issue request to reject' });
-    await setDoc(pool, document_id, { status: 'in_storage', pending_holder_id: null });
-    await logEvent(pool, { document_id, action: 'issue', stage: 'rejected', actor_id: req.user.user_id });
+    const emp = doc.pending_holder_id;
+    const label = doc.request_doc_name ? `${doc.request_doc_name} (${document_id})` : document_id;
+    await setDoc(pool, document_id, { status: 'in_storage', pending_holder_id: null, request_reason: null, request_doc_name: null });
+    await logEvent(pool, { document_id, action: 'issue', stage: 'rejected', actor_id: req.user.user_id, remarks: note.trim() });
+    if (emp) {
+      await q(pool)
+        .input('emp', sql.NVarChar, emp)
+        .input('doc', sql.NVarChar, document_id)
+        .input('msg', sql.NVarChar, `Your request for ${label} was rejected. Note: ${note.trim()}`)
+        .query(`INSERT INTO docflow.notifications (employee_id, document_id, type, message)
+                VALUES (@emp, @doc, 'reject', @msg)`);
+    }
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: 'Failed', detail: e.message }); }
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Failed', detail: e.message }); }
 });
 
 app.post('/api/admin/received', authRequired, adminOnly, async (req, res) => {
@@ -328,6 +348,25 @@ app.get('/api/report/custody', authRequired, adminOnly, async (req, res) => {
       ORDER BY m.requested_at DESC, m.movement_id DESC`);
     res.json(r.recordset);
   } catch (e) { console.error(e); res.status(500).json({ error: 'Report failed', detail: e.message }); }
+});
+
+/* ---------------- EMPLOYEE notifications (reject notes etc.) ---------------- */
+app.get('/api/my-notifications', authRequired, async (req, res) => {
+  if (!req.user.employee_id) return res.json([]);
+  try { const pool = await getPool();
+    const r = await q(pool).input('emp', sql.NVarChar, req.user.employee_id)
+      .query(`SELECT TOP 50 id, document_id, type, message, created_at, seen
+              FROM docflow.notifications WHERE employee_id = @emp ORDER BY created_at DESC`);
+    res.json(r.recordset);
+  } catch (e) { res.status(500).json({ error: 'Failed', detail: e.message }); }
+});
+app.post('/api/my-notifications/seen', authRequired, async (req, res) => {
+  if (!req.user.employee_id) return res.json({ ok: true });
+  try { const pool = await getPool();
+    await q(pool).input('emp', sql.NVarChar, req.user.employee_id)
+      .query(`UPDATE docflow.notifications SET seen = 1 WHERE employee_id = @emp AND seen = 0`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: 'Failed', detail: e.message }); }
 });
 
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'docflow', time: new Date().toISOString() }));

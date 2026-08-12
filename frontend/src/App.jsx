@@ -294,20 +294,48 @@ function AdminDocuments({ docs, reload }) {
 }
 
 /* ================= Admin ================= */
+function RejectModal({ doc, onClose }) {
+  const { notify, reload } = useContext(UI);
+  const [note, setNote] = useState(''); const [busy, setBusy] = useState(false);
+  async function submit() {
+    if (!note.trim()) return notify('error', 'Please add a note explaining the rejection');
+    setBusy(true);
+    try {
+      await api('/api/admin/reject', { method: 'POST', body: { document_id: doc.document_id, note } });
+      notify('success', 'Request rejected — employee notified'); await reload(); onClose();
+    } catch (e) { notify('error', e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 460 }} onClick={e => e.stopPropagation()}>
+        <h3>Reject request for {doc.document_id}</h3>
+        <p className="muted" style={{ marginBottom: 8 }}>Requested by {doc.pending_name}{doc.request_doc_name ? ` · “${doc.request_doc_name}”` : ''}{doc.request_reason ? ` — ${doc.request_reason}` : ''}</p>
+        <div className="field"><label>Rejection note (shown to the employee) *</label><textarea value={note} onChange={e => setNote(e.target.value)} rows={3} placeholder="Why is this request being rejected?" style={{ width: '100%', resize: 'vertical' }} autoFocus /></div>
+        <div className="m-actions"><button className="ghost" onClick={onClose}>Cancel</button><button className="primary" onClick={submit} disabled={busy}>{busy ? 'Rejecting…' : 'Reject & notify'}</button></div>
+      </div>
+    </div>
+  );
+}
 function AdminApprovals({ docs }) {
   const { run } = useContext(UI);
+  const [rejecting, setRejecting] = useState(null);
   const list = docs.filter(d => d.status === 'out_admin_review');
   return (
     <div className="card"><h3>Issue requests to approve ({list.length})</h3>
-      <table><thead><tr><th>Document</th><th>Tower / Flat</th><th>Requested for</th><th className="right">Decision</th></tr></thead>
+      <div className="panel-scroll" style={{ maxHeight: 460 }}>
+      <table><thead><tr><th>File No</th><th>Tower / Flat</th><th>Requested for</th><th>Document name</th><th>Reason</th><th className="right">Decision</th></tr></thead>
         <tbody>
           {list.map(d => (<tr key={d.document_id}><td>{d.document_id}</td><td className="muted">{d.tower} · {d.flat_number}</td><td>{d.pending_name}</td>
+            <td>{d.request_doc_name || '—'}</td><td className="muted">{d.request_reason || '—'}</td>
             <td className="right">
               <button className="primary" onClick={() => run({ confirmTitle: 'Approve issue request?', confirmMsg: `Approve issuing ${d.document_id} to ${d.pending_name}? A pickup task will be sent to the transferrer.`, confirmLabel: 'Approve', path: '/api/admin/approve', body: { document_id: d.document_id }, success: 'Approved — pickup sent to transferrer' })}>Approve</button>{' '}
-              <button className="ghost" onClick={() => run({ confirmTitle: 'Reject request?', confirmMsg: `Reject the request for ${d.document_id}? It stays in storage.`, confirmLabel: 'Reject', path: '/api/admin/reject', body: { document_id: d.document_id }, success: 'Request rejected' })}>Reject</button>
+              <button className="ghost" onClick={() => setRejecting(d)}>Reject</button>
             </td></tr>))}
-          {list.length === 0 && <tr><td colSpan={4} className="empty">No issue requests waiting.</td></tr>}
-        </tbody></table></div>
+          {list.length === 0 && <tr><td colSpan={6} className="empty">No issue requests waiting.</td></tr>}
+        </tbody></table>
+      </div>
+      {rejecting && <RejectModal doc={rejecting} onClose={() => setRejecting(null)} />}
+    </div>
   );
 }
 function AdminReceiving({ docs }) {
@@ -381,11 +409,35 @@ function TransferrerTransit({ docs, user }) {
 }
 
 /* ================= User ================= */
+function RequestModal({ doc, onClose }) {
+  const { notify, reload } = useContext(UI);
+  const [name, setName] = useState(''); const [reason, setReason] = useState(''); const [busy, setBusy] = useState(false);
+  async function submit() {
+    if (!name.trim() || !reason.trim()) return notify('error', 'Please enter the document name and a reason');
+    setBusy(true);
+    try {
+      await api('/api/movements/request-take', { method: 'POST', body: { document_id: doc.document_id, doc_name: name, reason } });
+      notify('success', 'Request sent for admin approval'); await reload(); onClose();
+    } catch (e) { notify('error', e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 460 }} onClick={e => e.stopPropagation()}>
+        <h3>Request file {doc.document_id}</h3>
+        <p className="muted" style={{ marginBottom: 16 }}>Tower {doc.tower} · Flat {doc.flat_number}{doc.remarks ? ` · ${doc.remarks}` : ''}</p>
+        <div className="field"><label>Document name *</label><input value={name} onChange={e => setName(e.target.value)} placeholder="Which document / paper do you need?" autoFocus /></div>
+        <div className="field"><label>Reason for request *</label><textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Why do you need this file?" style={{ width: '100%', resize: 'vertical' }} /></div>
+        <div className="m-actions"><button className="ghost" onClick={onClose}>Cancel</button><button className="primary" onClick={submit} disabled={busy}>{busy ? 'Sending…' : 'Send request'}</button></div>
+      </div>
+    </div>
+  );
+}
+
 function BrowseDocuments({ docs }) {
-  const { run } = useContext(UI);
   const projects = [...new Set(docs.map(d => d.doc_type).filter(Boolean))].sort();
   const [project, setProject] = useState('');
   const [search, setSearch] = useState(''); const [tower, setTower] = useState('');
+  const [requesting, setRequesting] = useState(null);
   const inProj = docs.filter(d => d.doc_type === project);
   const towers = [...new Set(inProj.map(d => d.tower).filter(Boolean))].sort();
   const list = inProj.filter(d => (!tower || d.tower === tower) &&
@@ -407,7 +459,7 @@ function BrowseDocuments({ docs }) {
                   <td>{d.document_id}</td><td>{d.tower}</td><td>{d.flat_number}</td><td className="muted">{d.remarks || '—'}</td><td><StatusBadge d={d} /></td>
                   <td className="right">{d.record_status === 'cancelled' ? <span className="badge b-cancel">Cancelled</span>
                     : d.status === 'in_storage'
-                      ? <button className="primary" onClick={() => run({ confirmTitle: 'Request this file?', confirmMsg: `Send a request to take ${d.document_id} (Tower ${d.tower}, Flat ${d.flat_number})? Admin will review it.`, confirmLabel: 'Request', path: '/api/movements/request-take', body: { document_id: d.document_id }, success: 'Request sent for admin approval' })}>Request to take</button>
+                      ? <button className="primary" onClick={() => setRequesting(d)}>Request to take</button>
                       : <span className="muted">Unavailable</span>}</td></tr>))}
                 {list.length === 0 && <tr><td colSpan={6} className="empty">No files match “{search}”.</td></tr>}
               </tbody></table>
@@ -415,6 +467,7 @@ function BrowseDocuments({ docs }) {
           )}
         </div>
       )}
+      {requesting && <RequestModal doc={requesting} onClose={() => setRequesting(null)} />}
     </>
   );
 }
@@ -538,18 +591,32 @@ function Sidebar({ user, items, tab, setTab, collapsed, onToggle, onSettings, on
     </div>
   );
 }
-function NotifBell({ notif }) {
+function NotifBell({ items, onOpen }) {
   const [open, setOpen] = useState(false);
+  function toggle() { const n = !open; setOpen(n); if (n && onOpen) onOpen(); }
+  const count = items.filter(i => i.unseen !== false).length;
   return (
     <div className="bellwrap">
-      <button className="bell" onClick={() => setOpen(o => !o)}><IBell />{notif.count > 0 && <span className="count">{notif.count}</span>}</button>
+      <button className="bell" onClick={toggle}><IBell />{count > 0 && <span className="count">{count}</span>}</button>
       {open && (
         <div className="notif-dropdown">
-          <div className="nh">Needs your action</div>
-          {notif.list.length === 0 ? <div className="empty2">You're all caught up 🎉</div>
-            : notif.list.map(d => (<div className="ni" key={d.document_id}><span className="dot" /><div><b>{d.document_id}</b> — {statusInfo(d).label}<div className="muted" style={{ fontSize: 12 }}>Tower {d.tower} · Flat {d.flat_number}</div></div></div>))}
+          <div className="nh">Notifications</div>
+          {items.length === 0 ? <div className="empty2">You're all caught up 🎉</div>
+            : items.map(i => (<div className="ni" key={i.key}><span className="dot" /><div><div>{i.text}</div><div className="muted" style={{ fontSize: 12 }}>{i.sub}</div></div></div>))}
         </div>
       )}
+    </div>
+  );
+}
+function AlertModal({ state, onClose }) {
+  if (!state) return null;
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="m-icon" style={{ background: '#fdecec', color: '#a32d2d' }}><IBell /></div>
+        <h3>{state.title}</h3><p>{state.message}</p>
+        <div className="m-actions"><button className="primary" onClick={onClose}>OK</button></div>
+      </div>
     </div>
   );
 }
@@ -584,9 +651,12 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [docs, setDocs] = useState([]);
   const [notif, setNotif] = useState({ count: 0, list: [] });
+  const [userNotes, setUserNotes] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [modal, setModal] = useState(null);
+  const [alertMsg, setAlertMsg] = useState(null);
   const prevNotif = useRef(null);
+  const seenNoteIds = useRef(new Set());
 
   const notify = useCallback((type, msg) => {
     const id = Math.random(); setToasts(t => [...t, { id, type, msg }]);
@@ -603,6 +673,14 @@ export default function App() {
       if (prevNotif.current !== null && n.count > prevNotif.current) notify('info', `${n.count - prevNotif.current} new item(s) need your action`);
       prevNotif.current = n.count;
     } catch {}
+    if (user.role === 'user') {
+      try {
+        const notes = await api('/api/my-notifications'); setUserNotes(notes);
+        const fresh = notes.filter(x => !x.seen && !seenNoteIds.current.has(x.id));
+        if (fresh.length) { setAlertMsg({ title: 'Request update', message: fresh[0].message }); notify('info', 'You have a new note from admin'); }
+        notes.forEach(x => seenNoteIds.current.add(x.id));
+      } catch {}
+    }
   }, [user, notify]);
 
   const run = useCallback(async ({ confirmTitle, confirmMsg, confirmLabel, path, body, success, after }) => {
@@ -618,7 +696,7 @@ export default function App() {
   if (booting) return <LoadingSplash onDone={() => setBooting(false)} />;
   if (!user) return <Login onLogin={u => { setUser(u); setTab(u.role === 'admin' ? 'documents' : u.role === 'transferrer' ? 'pickups' : 'browse'); }} />;
   if (user.must_change_password) return (
-    <UI.Provider value={{ run, notify, confirm }}><div className="page"><ChangePassword forced onDone={() => setUser(loadUser())} /></div>
+    <UI.Provider value={{ run, notify, confirm, reload }}><div className="page"><ChangePassword forced onDone={() => setUser(loadUser())} /></div>
       <ConfirmModal state={modal} onResolve={resolveModal} /><Toasts toasts={toasts} /></UI.Provider>
   );
 
@@ -650,17 +728,25 @@ export default function App() {
     ],
   };
   const items = itemsByRole[user.role] || itemsByRole.user;
+  const bellItems = user.role === 'user'
+    ? userNotes.map(n => ({ key: n.id, text: n.message, sub: new Date(n.created_at).toLocaleString(), unseen: !n.seen }))
+    : notif.list.map(d => ({ key: d.document_id, text: `${d.document_id} — ${statusInfo(d).label}`, sub: `Tower ${d.tower} · Flat ${d.flat_number}`, unseen: true }));
+  async function onBellOpen() {
+    if (user.role === 'user' && userNotes.some(n => !n.seen)) {
+      try { await api('/api/my-notifications/seen', { method: 'POST' }); setUserNotes(ns => ns.map(n => ({ ...n, seen: true }))); } catch {}
+    }
+  }
   const titles = { documents: 'Live Document Locations', approvals: 'Issue Approvals', receiving: 'Returns Receiving', report: 'Custody Report', users: 'User Management', pickups: 'Pickup Requests', transit: 'In Transit', browse: 'All Documents', mine: 'My Custody', password: 'Account Settings' };
   const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
   return (
-    <UI.Provider value={{ run, notify, confirm }}>
+    <UI.Provider value={{ run, notify, confirm, reload }}>
       <div className="layout">
         <Sidebar user={user} items={items} tab={tab} setTab={setTab} collapsed={collapsed} onToggle={() => setCollapsed(v => !v)} onSettings={() => setTab('password')} onLogout={logout} />
         <div className="content">
           <div className="topbar2">
             <div className="title">{titles[tab] || 'Document Flow'}<small>Smart World Developers · Custody Portal</small></div>
-            <div className="right"><NotifBell notif={notif} /><span className="live-pill"><span className="g" />LIVE</span><span className="date">{today}</span></div>
+            <div className="right"><NotifBell items={bellItems} onOpen={onBellOpen} /><span className="live-pill"><span className="g" />LIVE</span><span className="date">{today}</span></div>
           </div>
           <div className="page">
             {user.role === 'admin' && tab === 'documents' && <AdminDocuments docs={docs} reload={reload} />}
@@ -678,6 +764,7 @@ export default function App() {
         </div>
       </div>
       <ConfirmModal state={modal} onResolve={resolveModal} />
+      <AlertModal state={alertMsg} onClose={() => setAlertMsg(null)} />
       <Toasts toasts={toasts} />
     </UI.Provider>
   );

@@ -45,6 +45,8 @@ CREATE TABLE docflow.documents (
     pending_holder_id   NVARCHAR(50)  NULL,
     transferrer_user_id INT           NULL,
     record_status       NVARCHAR(10)  NOT NULL DEFAULT 'active',
+    request_reason      NVARCHAR(500) NULL,
+    request_doc_name    NVARCHAR(200) NULL,
     updated_at          DATETIME2     NOT NULL DEFAULT SYSDATETIME(),
     CONSTRAINT FK_documents_holder FOREIGN KEY (current_holder_id)
         REFERENCES docflow.employees(employee_id)
@@ -101,6 +103,19 @@ IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_documents_pending
 IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_documents_transferrer')
     ALTER TABLE docflow.documents ADD CONSTRAINT FK_documents_transferrer
         FOREIGN KEY (transferrer_user_id) REFERENCES docflow.users(user_id);
+GO
+
+/* ---------- 6c. Employee notifications ---------- */
+IF OBJECT_ID('docflow.notifications','U') IS NULL
+CREATE TABLE docflow.notifications (
+    id           INT IDENTITY(1,1) PRIMARY KEY,
+    employee_id  NVARCHAR(50)  NULL REFERENCES docflow.employees(employee_id),
+    document_id  NVARCHAR(50)  NULL,
+    type         NVARCHAR(30)  NULL,
+    message      NVARCHAR(1000) NULL,
+    created_at   DATETIME2     NOT NULL DEFAULT SYSDATETIME(),
+    seen         BIT           NOT NULL DEFAULT 0
+);
 GO
 
 /* ---------- 7. Indexes ---------- */
