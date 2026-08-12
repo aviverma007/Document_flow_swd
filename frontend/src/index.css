@@ -217,6 +217,8 @@ tr:hover td { background: #f7f9fc; }
 .side-footer .user-block { border-top: none; padding: 8px 4px; }
 
 /* ---------- Fixed-height panel with internal scroll ---------- */
+.panel-scroll { overflow-y: auto; }
+.panel-scroll thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
 .fixed-panel { height: 440px; display: flex; flex-direction: column; }
 .fixed-panel .panel-scroll { flex: 1; overflow-y: auto; }
 .fixed-panel .panel-scroll thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
